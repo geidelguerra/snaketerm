@@ -44,12 +44,44 @@ func (p *Player) DrawPlayer(out *bytes.Buffer) {
 	tail := p.next
 	for tail != nil {
 		SetCursor(out, tail.x, tail.y)
-		out.WriteString("*")
+		out.WriteString("+")
 		tail = tail.next
 	}
 	
 	SetCursor(out, p.x, p.y)
-	out.WriteString("#")
+	switch p.dir {
+	case UP:
+		out.WriteRune(0x25b2)
+	case DOWN:
+		out.WriteRune(0x25bc)
+	case LEFT:
+		out.WriteRune(0x25c0)
+	case RIGHT:
+		out.WriteRune(0x25b6)
+	default:
+		out.WriteRune(0x25c6)
+	}
+}
+
+func DrawGrid(out *bytes.Buffer, x, y, w, h int) {
+	for i := x; i <= x + w; i += 1 {
+		for j := y; j <= y + h; j += 1 {
+			SetCursor(out, i, j)
+			if i == x && j == y {
+				out.WriteRune(0x2554)
+			} else if i == x + w && j == y {
+				out.WriteRune(0x2557)
+			} else if i == x && j == y + h {
+				out.WriteRune(0x255a)
+			} else if i == x + w && j == y + h {
+				out.WriteRune(0x255d)
+			} else if j == y || j == y + h {
+				out.WriteRune(0x2550)
+			} else if i == x || i == x + w {
+				out.WriteRune(0x2551)
+			}
+		}
+	}
 }
 
 func (p *Player) MovePlayer() {
@@ -77,15 +109,15 @@ func (p *Player) MovePlayer() {
 }
 
 func (p *Player) ResetPlayer(x, y, w, h int) {
-	p.x = x + rand.Intn(w)
-	p.y = y + rand.Intn(h)
+	p.x = x + 1 + rand.Intn(w - 1)
+	p.y = y + 1 + rand.Intn(h - 1)
 	p.dir = -1
 	p.next = nil
 	p.size = 1
 }
 
 func (p *Player) CheckPlayerHitBounds(x, y, w, h int) (bool) {
-	return p.x < x || p.x > w || p.y < y || p.y > h
+	return p.x <= x || p.x >= x + w || p.y <= y || p.y >= y + h
 }
 
 func (p *Player) CheckPlayerHitItself() (bool) {
@@ -109,8 +141,8 @@ func (p *Player) CheckPlayerHitApple(apple Apple) (bool) {
 }
 
 func (a *Apple) SpawnApple(x, y, w, h int) {
-	a.x = x + rand.Intn(w)
-	a.y = y + rand.Intn(h)
+	a.x = x + 1 + rand.Intn(w - 1)
+	a.y = y + 1 + rand.Intn(h - 1)
 	a.spawned = true
 }
 
@@ -134,16 +166,18 @@ func main () {
 	}
 	defer term.Restore(int(os.Stdin.Fd()), state)
 	
-	player := Player{ 1, 1, -1, nil, 0 }
-	
-	apple := Apple{ 1, 1, false }
+	w, h, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		panic(err)
+	}
 
 	var out bytes.Buffer
 	var inputBuf [64]byte
 	var inputNBytes int
 	quit := false
 	gameOver := false
-	
+	gridW, gridH := 40, 20
+	gridX, gridY := w / 2 - gridW / 2, h / 2 - gridH / 2
 	var m sync.Mutex
 
 	go func (buf *[64]byte, nBytes *int, m *sync.Mutex) {
@@ -169,21 +203,21 @@ func main () {
 	}(&inputBuf, &inputNBytes, &m)
 	
 	os.Stdout.WriteString("\x1b[?25l")
-
+	
+	player := Player{ 1, 1, -1, nil, 0 }
+	player.ResetPlayer(gridX, gridY, gridW, gridH)
+	
+	apple := Apple{ 1, 1, false }
+	apple.SpawnApple(gridX, gridY, gridW, gridH)
 	for !quit {
-		w, h, err := term.GetSize(int(os.Stdout.Fd()))
-		if err != nil {
-			panic(err)
-		}
-
 		out.Reset()
 		ClearScreen(&out)
 		SetCursor(&out, 1, 1)
 		
 		if gameOver {
 			if inputNBytes == 1 && inputBuf[0] == '\r' {
-				apple.SpawnApple(1, 1, w, h)
-				player.ResetPlayer(1, 1, w, h)
+				apple.SpawnApple(gridX, gridY, gridW, gridH)
+				player.ResetPlayer(gridX, gridY, gridW, gridH)
 				gameOver = false
 			}
 
@@ -205,13 +239,15 @@ func main () {
 				}
 			}
 
+			DrawGrid(&out, gridX, gridY, gridW, gridH)
+
 			if !apple.spawned {
-				apple.SpawnApple(1, 1, w, h)
+				apple.SpawnApple(gridX, gridY, gridW, gridH)
 			}
 
 			player.MovePlayer()
 
-			if player.CheckPlayerHitBounds(1, 1, w, h) {
+			if player.CheckPlayerHitBounds(gridX, gridY, gridW, gridH) {
 				gameOver = true
 				continue
 			}
@@ -223,7 +259,7 @@ func main () {
 
 			if player.CheckPlayerHitApple(apple) {
 				player.GrowPlayer()
-				apple.SpawnApple(1, 1, w, h)
+				apple.SpawnApple(gridX, gridY, gridW, gridH)
 			}
 
 			apple.DrawApple(&out)
